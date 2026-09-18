@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../lib/api.js'
 import { useApp } from '../lib/app-context.jsx'
 import { rm, cx } from '../lib/format.js'
@@ -16,7 +17,11 @@ export default function MyHotel() {
     api
       .get('/settings/my-hotel')
       .then((data) => {
-        setHotel({ name: data.name || '', roomTypes: data.roomTypes || [] })
+        setHotel({
+          name: data.name || '',
+          roomTypes: data.roomTypes || [],
+          location: data.location || null,
+        })
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
@@ -59,7 +64,11 @@ export default function MyHotel() {
           capacity: Number(r.capacity) || 2,
         })),
       })
-      setHotel({ name: saved.name, roomTypes: saved.roomTypes })
+      setHotel({
+        name: saved.name,
+        roomTypes: saved.roomTypes,
+        location: saved.location ?? null,
+      })
       setDirty(false)
       await refreshDashboard()
       toast('Your rates were saved', 'emerald', 'Undercut alerts now compare against these.')
@@ -109,6 +118,27 @@ export default function MyHotel() {
           className="input max-w-md"
           placeholder="e.g. Rumah Ku Boutique Hotel"
         />
+
+        <div className="mt-4 border-t border-ink-100 pt-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="label">Map location</p>
+              {hotel.location?.lat != null ? (
+                <p className="mt-1 text-sm text-ink-600">
+                  📍 {hotel.location.address || `${hotel.location.lat.toFixed(5)}, ${hotel.location.lng.toFixed(5)}`}
+                </p>
+              ) : (
+                <p className="mt-1 text-sm text-ink-500">
+                  Not set. Setting your property on the map lets EC Price Tracker find the hotels
+                  around you automatically.
+                </p>
+              )}
+            </div>
+            <Link to="/map" className="btn-secondary btn-sm whitespace-nowrap">
+              {hotel.location?.lat != null ? 'Change on map' : 'Set on map'}
+            </Link>
+          </div>
+        </div>
       </Card>
 
       <section>

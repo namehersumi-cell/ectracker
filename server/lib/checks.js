@@ -126,37 +126,7 @@ export async function checkCompetitorOta({
     return { ota, otaLabel, status: 'error', error: failed.error, check: failed, alerts: [] }
   }
 
-  // Currency guard first (a foreign price can never be compared as RM), then
-  // the deviation sanity check against the previous reading.
-  const guarded = extraction.roomTypes.map(applyCurrencyGuard)
-  const roomTypes = []
-  for (const entry of guarded) {
-    const previous = await previousReading(store, competitor.id, ota, entry)
-    roomTypes.push(flagSuspicious(entry, previous))
-  }
-
-  const anySuspect = roomTypes.some((r) => r.suspect)
-  const anyCurrencyIssue = roomTypes.some((r) => r.suspectReason?.startsWith('currency'))
-  const status = anySuspect ? 'suspect' : 'ok'
-
-  const check = {
-    id: checkId,
-    competitorId: competitor.id,
-    competitorName: competitor.name,
-    ota,
-    otaLabel,
-    checkedAt,
-    status,
-    error: anyCurrencyIssue
-      ? roomTypes.find((r) => r.suspectReason?.startsWith('currency'))?.suspectReason
-      : null,
-    method: extraction.method,
-    notes: extraction.notes || null,
-    simulated: Boolean(extraction.simulated || !hasApiKey()),
-    roomTypes,
-  }
-  await store.set('priceChecks', checkId, check)
-  await recordOtaResult({ ota, otaLabel, ok: true })
+  const check = await saveCheckFromExtraction({ competitor, ota, extraction, checkId, checkedAt })
 
   const settings = await getNotificationSettings()
   const alerts = await detectAlerts({ check, competitor, myHotel, mappings })
@@ -169,7 +139,58 @@ export async function checkCompetitorOta({
     delivery.push({ alertId: alert.id, ...result })
   }
 
-  return { ota, otaLabel, status, check, alerts, delivery, simulated: check.simulated }
+  return { ota, otaLabel, status: check.status, check, alerts, delivery, simulated: check.simulated }
+}
+
+/**
+ * Guard, sanity-flag and persist a successful extraction as a `priceChecks`
+ * row.
+ *
+ * Shared with discovery so a hotel added from the map lands in the same shape as
+ * one checked by the scheduler. A hotel added without this would appear in the
+ * UI with its room names but no prices, which reads as a broken feature.
+ */
+export async function saveCheckFromExtraction({
+  competitor,
+  ota,
+  extraction,
+  checkId = newId(),
+  checkedAt = nowIso(),
+}) {
+  const store = await getStore()
+  const otaLabel = OTA_LABELS[ota]
+
+  // Currency guard first (a foreign price can never be compared as RM), then
+  // the deviation sanity check against the previous reading.
+  const guarded = extraction.roomTypes.map(applyCurrencyGuard)
+  const roomTypes = []
+  for (const entry of guarded) {
+    const previous = await previousReading(store, competitor.id, ota, entry)
+    roomTypes.push(flagSuspicious(entry, previous))
+  }
+
+  const anySuspect = roomTypes.some((r) => r.suspect)
+  const anyCurrencyIssue = roomTypes.some((r) => r.suspectReason?.startsWith('currency'))
+
+  const check = {
+    id: checkId,
+    competitorId: competitor.id,
+    competitorName: competitor.name,
+    ota,
+    otaLabel,
+    checkedAt,
+    status: anySuspect ? 'suspect' : 'ok',
+    error: anyCurrencyIssue
+      ? roomTypes.find((r) => r.suspectReason?.startsWith('currency'))?.suspectReason
+      : null,
+    method: extraction.method,
+    notes: extraction.notes || null,
+    simulated: Boolean(extraction.simulated || !hasApiKey()),
+    roomTypes,
+  }
+  await store.set('priceChecks', checkId, check)
+  await recordOtaResult({ ota, otaLabel, ok: true })
+  return check
 }
 
 async function previousReading(store, competitorId, ota, entry) {
@@ -252,7 +273,168 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/** Health strip data for the dashboard: per-OTA status + last success. */
+/**
+ * Per-room-type price comparison across OTAs.
+ *
+ * Every OTA prices the same room differently, which is the whole point of
+ * tracking three of them. This returns, for one room type, what each tracked
+ * hotel charges on each OTA — so the UI can show
+ * "Standard Queen Room · Booking.com RM x · Agoda RM y · Trip.com RM z".
+ *
+ * Prices come from the most recent successful, non-suspect check per OTA.
+ *
+ * Rooms are selected by stay *offset* (tonight / +7d / +30d) rather than by
+ * absolute date. A check stores the actual calendar dates it was run against,
+ * so a check from three days ago has "tonight = three days ago" — matching on
+ * the date would silently drop that OTA from the table whenever its last
+ * success was not today.
+ */
+export async function getRoomPriceMatrix({
+  checkInDate,
+  offset = 0,
+  myRoomTypeId = null,
+  competitors = null,
+} = {}) {
+  const store = await getStore()
+  const myHotel = (await store.get('settings', 'myHotel')) || { roomTypes: [] }
+  const comps = competitors || (await store.list('competitors')).filter((c) => c.active !== false)
+  const mappings = await store.list('roomMappings')
+  const checks = await store.list('priceChecks')
+  const date = checkInDate || checkInDates()[offset]?.date || checkInDates()[0].date
+
+  const myRooms = (myHotel.roomTypes || []).filter(
+    (r) => !myRoomTypeId || r.id === myRoomTypeId,
+  )
+
+  const matrix = myRooms.map((myRoom) => {
+    // A competitor room counts as this room type if it is explicitly mapped, or
+    // if the names line up under the forgiving matcher.
+    const row = {
+      myRoomTypeId: myRoom.id,
+      myRoomName: myRoom.name,
+      myBasePrice: Number(myRoom.basePrice) || null,
+      otas: Object.fromEntries(OTAS.map((o) => [o, { price: null, competitorName: null }])),
+      competitors: [],
+    }
+
+    for (const comp of comps) {
+      const mappedNames = new Set(
+        mappings
+          .filter((m) => m.competitorId === comp.id && m.myRoomTypeId === myRoom.id)
+          .map((m) => m.otaRoomName)
+          .filter(Boolean),
+      )
+
+      const perOta = {}
+      let anyPrice = false
+
+      for (const ota of OTAS) {
+        const latest = checks
+          .filter((c) => c.competitorId === comp.id && c.ota === ota && c.status === 'ok')
+          .sort((a, b) => new Date(b.checkedAt) - new Date(a.checkedAt))[0]
+        if (!latest) continue
+
+        const latestDate = klDateString(new Date(latest.checkedAt))
+        const room = (latest.roomTypes || []).find((rt) => {
+          if (rt.suspect || !rt.price) return false
+          // Compare the stay offset this reading was taken for.
+          if (rt.checkInDate && dayDiff(latestDate, rt.checkInDate) !== offset) return false
+          if (mappedNames.has(rt.name)) return true
+          return roomNamesMatch(rt.name, myRoom.name)
+        })
+        if (!room) continue
+
+        perOta[ota] = {
+          price: room.price,
+          roomName: room.name,
+          roomsLeft: room.roomsLeft,
+          asOf: latest.checkedAt,
+        }
+        anyPrice = true
+      }
+
+      if (!anyPrice) continue
+
+      row.competitors.push({
+        competitorId: comp.id,
+        competitorName: comp.name,
+        isOwn: Boolean(comp.isOwn),
+        perOta,
+        cheapest: cheapestOf(perOta),
+      })
+
+      // Headline cell per OTA = the cheapest listing on that OTA across the
+      // whole comp set, which is what the operator is actually competing with.
+      // An own-hotel listing only wins a tie, so my own rate never masks a
+      // cheaper competitor.
+      for (const ota of OTAS) {
+        if (!perOta[ota]) continue
+        const current = row.otas[ota]
+        const better =
+          !current.price ||
+          perOta[ota].price < current.price ||
+          (perOta[ota].price === current.price && current.competitorIsOwn && !comp.isOwn)
+        if (better) {
+          row.otas[ota] = {
+            price: perOta[ota].price,
+            competitorName: comp.name,
+            competitorId: comp.id,
+            roomsLeft: perOta[ota].roomsLeft,
+            asOf: perOta[ota].asOf,
+            competitorIsOwn: Boolean(comp.isOwn),
+          }
+        }
+      }
+    }
+
+    row.competitors.sort((a, b) => a.cheapest - b.cheapest)
+
+    // Market range spans every competitor on every OTA, not just the headline
+    // cells. Using the headline cells here would understate the market and could
+    // tell the operator they are below it when a cheaper rival exists.
+    const allPrices = row.competitors.flatMap((c) =>
+      Object.values(c.perOta)
+        .map((p) => p.price)
+        .filter(Boolean),
+    )
+    row.cheapestOta = cheapestOta(row.otas)
+    row.marketLow = allPrices.length ? Math.min(...allPrices) : null
+    row.marketHigh = allPrices.length ? Math.max(...allPrices) : null
+    row.myPriceVsMarket =
+      row.myBasePrice && row.marketLow ? row.myBasePrice - row.marketLow : null
+    // Per-OTA spread for one room is a pricing signal in its own right.
+    row.otaSpread = row.marketLow && row.marketHigh ? row.marketHigh - row.marketLow : null
+    // Who holds the market low, so "above market" is actionable rather than a number.
+    row.marketLowHotel = row.competitors[0]?.competitorName || null
+    row.marketLowHotelIsOwn = Boolean(row.competitors[0]?.isOwn)
+    return row
+  })
+
+  return { checkInDate: date, offset, rooms: matrix, simulated: !hasApiKey() }
+}
+
+/** Whole days between two YYYY-MM-DD strings (b - a). */
+function dayDiff(a, b) {
+  const toMs = (s) => new Date(`${s}T00:00:00Z`).getTime()
+  return Math.round((toMs(b) - toMs(a)) / 86_400_000)
+}
+
+function cheapestOf(perOta) {
+  const prices = Object.values(perOta)
+    .map((p) => p.price)
+    .filter(Boolean)
+  return prices.length ? Math.min(...prices) : null
+}
+
+function cheapestOta(otas) {
+  let best = null
+  for (const ota of OTAS) {
+    const p = otas[ota]?.price
+    if (p && (!best || p < best.price)) best = { ota, price: p }
+  }
+  return best
+}
+
 export async function getOtaHealth() {
   const store = await getStore()
   const rows = await store.list('otaHealth')

@@ -1,10 +1,11 @@
 const BASE = '/api'
 
-async function request(path, { method = 'GET', body, headers = {} } = {}) {
+async function request(path, { method = 'GET', body, headers = {}, signal } = {}) {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: { 'Content-Type': 'application/json', ...headers },
     credentials: 'same-origin',
+    signal,
     body: body === undefined ? undefined : JSON.stringify(body),
   })
 
@@ -28,7 +29,7 @@ async function request(path, { method = 'GET', body, headers = {} } = {}) {
 }
 
 export const api = {
-  get: (path) => request(path),
+  get: (path, opts) => request(path, opts),
   post: (path, body) => request(path, { method: 'POST', body }),
   put: (path, body) => request(path, { method: 'PUT', body }),
   del: (path) => request(path, { method: 'DELETE' }),

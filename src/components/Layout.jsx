@@ -6,6 +6,8 @@ import { Dot, Spinner } from './ui.jsx'
 const NAV = [
   { to: '/', label: 'Dashboard', icon: 'grid', end: true },
   { to: '/hotel', label: 'My Hotel', icon: 'building' },
+  { to: '/map', label: 'Map', icon: 'map' },
+  { to: '/rooms', label: 'Room Prices', icon: 'tag' },
   { to: '/competitors', label: 'Competitors', icon: 'users' },
   { to: '/calendar', label: 'Calendar', icon: 'calendar' },
   { to: '/history', label: 'History', icon: 'list' },
@@ -14,6 +16,8 @@ const NAV = [
 
 const ICONS = {
   grid: 'M3 3h6v6H3V3zm0 8h6v6H3v-6zm8-8h6v6h-6V3zm0 8h6v6h-6v-6z',
+  map: 'M9 2 3 4.5v17L9 19l6 3 6-2.5v-17L15 5 9 2zm0 2.2 6 2.5v12.1l-6-2.5V4.2z',
+  tag: 'M3 3h8l10 10-8 8L3 11V3zm4 3a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z',
   building:
     'M4 3h8v14H4V3zm2 2v2h2V5H6zm0 4v2h2V9H6zm0 4v2h2v-2H6zm10-6h2v10h-2V7zm-4 4h2v6h-2v-6z',
   users:

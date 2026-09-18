@@ -1,4 +1,4 @@
-# AGENTS.md — EC Price Tracker
+# AGENTS.md тАФ EC Price Tracker
 
 Repository knowledge for future sessions. Read this before making changes.
 
@@ -22,28 +22,36 @@ npm run seed     # regenerate demo data (destroys data/db.json)
 npm run dev:client   # Vite on :5173, proxies /api to :12000
 ```
 
-`npm test` is not decorative — it caught a real cross-OTA merge ordering bug.
+`npm test` is not decorative тАФ it caught a real cross-OTA merge ordering bug.
 Run it after touching `server/lib/`.
 
 ## Layout
 
-- `server/lib/gemini.js` — extraction. URL Context, Google Search fallback,
-  and an offline simulator.
-- `server/lib/checks.js` — the check pipeline and the Gemini usage counter.
-- `server/lib/alerts.js` — alert detection plus the currency and sanity guards.
-- `server/lib/telegram.js` — delivery, quiet hours, digests, failure watchdog.
-- `server/lib/dates.js` — **all** Kuala Lumpur date logic.
-- `server/store.js` — Firestore, falling back to a JSON document store.
-- `src/lib/format.js` — RM formatting, KL time, heat colours.
-- `src/pages/` — one file per route.
+- `server/lib/gemini.js` тАФ extraction. URL Context, Google Search fallback,
+  offline simulator, and `resolveOtaUrls` for hotels found on the map.
+- `server/lib/places.js` тАФ Google Places autocomplete/nearby/details, plus the
+  offline simulator and `distanceMeters`. **The only place that talks to Maps.**
+- `server/lib/discovery.js` тАФ radius clamp, store-backed discovery settings,
+  `scanNearby`, `addDiscoveredHotels`, `refreshCompetitorRooms`.
+- `server/lib/room-match.js` тАФ scored room-name matching (`scoreRoomMatch`,
+  `suggestLinks`) behind the linking UI.
+- `server/lib/checks.js` тАФ the check pipeline, `getRoomPriceMatrix`, and the
+  Gemini usage counter.
+- `server/lib/alerts.js` тАФ alert detection plus the currency and sanity guards.
+- `server/lib/telegram.js` тАФ delivery, quiet hours, digests, failure watchdog.
+- `server/lib/dates.js` тАФ **all** Kuala Lumpur date logic.
+- `server/store.js` тАФ Firestore, falling back to a JSON document store.
+- `src/lib/format.js` тАФ RM formatting, KL time, heat colours.
+- `src/components/CompMap.jsx` тАФ Leaflet map + radius circle.
+- `src/pages/` тАФ one file per route.
 
-## Invariants — do not break these
+## Invariants тАФ do not break these
 
 1. **Every comparison keys on competitor + OTA + room + `checkInDate`.**
    Dropping the check-in date makes a Saturday rate look like a crash against a
    Tuesday rate. This is the single most important rule in the codebase.
 
-2. **`suspect` entries never fire alerts.** They are stored and shown with a 🚩
+2. **`suspect` entries never fire alerts.** They are stored and shown with a ЁЯЪй
    badge, but `detectAlerts` skips them. A suspect price is by definition one
    we don't trust.
 
@@ -65,10 +73,33 @@ Run it after touching `server/lib/`.
 
 7. **Simulated data must never masquerade as real.** With no `GEMINI_API_KEY`
    the app generates readings, but every one carries `simulated: true` and the
-   UI shows a 🧪 banner. Keep it that way.
+   UI shows a ЁЯзк banner. Keep it that way.
 
 8. **Telegram credentials and the PIN never touch the client or Firestore.**
    Server environment variables only.
+
+9. **`marketLow`/`marketHigh` span every competitor's every OTA, never just the
+   headline cell.** The headline cell is the cheapest listing *per OTA*; using
+   those three numbers as the market range understates it and can tell the
+   operator they are below market while a cheaper rival exists. There is a test
+   for exactly this, and it was a real bug.
+
+10. **My own listing only wins a headline cell on a tie.** The own-hotel row is
+    useful context, but it must never mask a cheaper competitor.
+
+11. **Room matching treats bed config and occupancy as hard conflicts, and
+    marketing tier as soft.** Queen vs Twin is a different product and is never
+    suggested; "Standard" vs "Deluxe" is the same room at many hotels and must
+    stay linkable. Collapsing these two cases breaks the feature in one
+    direction or the other.
+
+12. **A wrong OTA URL is worse than a missing one.** `resolveOtaUrls` returns
+    `null` rather than guessing, and rejects search-results URLs. A bad URL
+    silently feeds a different hotel's rates into every comparison.
+
+13. **Maps has an offline simulator too.** With no `GOOGLE_MAPS_API_KEY` the
+    Map page runs against deterministic fake places, labelled 🧪. The code path
+    is identical to the live one — keep it that way so the flow stays testable.
 
 ## Conventions
 
@@ -79,14 +110,14 @@ Run it after touching `server/lib/`.
 - Reusable primitives live in `src/components/ui.jsx`; add there rather than
   re-styling a one-off.
 - Comments explain *why*, not *what*. Several non-obvious invariants above are
-  documented inline at the point that enforces them — don't strip those.
+  documented inline at the point that enforces them тАФ don't strip those.
 
 ## Gotchas
 
 - `node --test server/test/` fails; the glob form is required:
   `node --test "server/test/*.test.js"` (already wired as `npm test`).
 - The store reads `DATA_DIR` **at import time**. Tests set it before importing
-  anything else — keep that ordering if you add test files.
+  anything else тАФ keep that ordering if you add test files.
 - `data/` is gitignored. Seeding destroys it; there is no migration story.
 - Cron endpoints return **503** when `CRON_SECRET` is unset (fail closed) and
   **401** on a wrong key. Don't "fix" the 503 into a 200.
@@ -98,5 +129,5 @@ Run it after touching `server/lib/`.
 Per the v2 spec's own "do not build" list: WhatsApp notifications, AI price
 prediction, multi-user logins, native apps, >10 competitors. Phase 6 optional
 items (weekly behaviour summary, length-of-stay checks, per-room thresholds,
-PWA, 12-month retention) are intentionally unbuilt — the spec says they should
-only follow 2–3 weeks of real use.
+PWA, 12-month retention) are intentionally unbuilt тАФ the spec says they should
+only follow 2тАУ3 weeks of real use.

@@ -27,6 +27,7 @@ export default function Competitors() {
   const [adding, setAdding] = useState(false)
   const [error, setError] = useState(null)
   const [mappingFor, setMappingFor] = useState(null)
+  const [refreshing, setRefreshing] = useState(null)
 
   const lastCheckByCompetitor = useMemo(() => {
     const map = {}
@@ -71,6 +72,27 @@ export default function Competitors() {
 
   const mappingCount = (competitorId) =>
     (mappings || []).filter((m) => m.competitorId === competitorId).length
+
+  const refreshRooms = async (competitor) => {
+    setRefreshing(competitor.id)
+    setError(null)
+    try {
+      const res = await api.post(`/competitors/${competitor.id}/refresh-rooms`)
+      await reload()
+      const found = res.discoveredRoomNames?.length || 0
+      toast(
+        `Found ${found} room type${found === 1 ? '' : 's'}`,
+        found > 0 ? 'emerald' : 'amber',
+        found > 0
+          ? `Read from ${Object.keys(res.otaUrls || {}).filter((k) => res.otaUrls[k]).length} OTA pages.`
+          : 'No OTA pages could be matched for this hotel.',
+      )
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setRefreshing(null)
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -197,7 +219,27 @@ export default function Competitors() {
                           ? `checked ${relativeTime(lastCheckByCompetitor[competitor.id])}`
                           : 'never checked'}
                       </span>
+                      {competitor.source === 'map' && (
+                        <Badge tone="slate">found on map</Badge>
+                      )}
                     </div>
+                    {(competitor.address || competitor.distanceM) && (
+                      <p className="mt-1.5 truncate text-[11px] text-ink-500">
+                        📍 {competitor.address || `${competitor.location?.lat?.toFixed(4)}, ${competitor.location?.lng?.toFixed(4)}`}
+                        {competitor.distanceM != null && (
+                          <span className="ml-1.5 font-medium">
+                            {competitor.distanceM >= 1000
+                              ? `${(competitor.distanceM / 1000).toFixed(1)} km away`
+                              : `${competitor.distanceM} m away`}
+                          </span>
+                        )}
+                      </p>
+                    )}
+                    {(competitor.discoveredRoomNames || []).length > 0 && (
+                      <p className="mt-1.5 text-[11px] text-ink-500">
+                        {(competitor.discoveredRoomNames || []).length} room types found on the OTAs
+                      </p>
+                    )}
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
@@ -231,6 +273,22 @@ export default function Competitors() {
                     >
                       Room mapping
                     </button>
+                    {otas.length < 3 && (
+                      <button
+                        type="button"
+                        className="btn-ghost btn-sm"
+                        onClick={() => refreshRooms(competitor)}
+                        disabled={refreshing === competitor.id}
+                        title="Search the OTAs for this hotel's pages and room types"
+                      >
+                        {refreshing === competitor.id ? (
+                          <Spinner className="h-3.5 w-3.5" />
+                        ) : (
+                          '🔎'
+                        )}{' '}
+                        Find rooms
+                      </button>
+                    )}
                     <ConfirmButton
                       className="btn-danger btn-sm"
                       confirmLabel="Delete?"

@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai'
 import { checkInDates, addDays } from './dates.js'
+import { suggestRoomTypes } from './places.js'
 
 /**
  * Gemini extraction.
@@ -103,12 +104,12 @@ export function setCallCounter(fn) {
   onCall = fn
 }
 
-async function callGemini({ prompt, useUrlContext, url }) {
+async function callGemini({ prompt, useUrlContext, url, schema = RESPONSE_SCHEMA }) {
   const ai = getClient()
   onCall()
   const config = {
     responseMimeType: 'application/json',
-    responseSchema: RESPONSE_SCHEMA,
+    responseSchema: schema,
     temperature: 0,
   }
   if (useUrlContext) {
@@ -125,6 +126,101 @@ async function callGemini({ prompt, useUrlContext, url }) {
   })
   const text = res.text ?? res.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
   return JSON.parse(text)
+}
+
+const OTA_URL_SCHEMA = {
+  type: 'object',
+  properties: {
+    booking: { type: 'string', nullable: true },
+    agoda: { type: 'string', nullable: true },
+    tripcom: { type: 'string', nullable: true },
+    matchedName: { type: 'string', nullable: true },
+    matchedAddress: { type: 'string', nullable: true },
+    confident: { type: 'boolean' },
+    notes: { type: 'string', nullable: true },
+  },
+  required: ['confident'],
+}
+
+/**
+ * Find a hotel's page on each OTA, given only its name and address from the
+ * map. Discovery hands us properties we have no URLs for, and without a URL
+ * there is nothing to read rates from.
+ *
+ * The result is checked against the address we asked about: an OTA match for a
+ * same-named hotel in another city is worse than no match at all, because it
+ * would silently feed wrong prices into every comparison.
+ */
+export async function resolveOtaUrls({ hotelName, address }) {
+  const prompt = `Find the official page URL for the hotel "${hotelName}"${
+    address ? ` located at "${address}"` : ''
+  } on each of these travel sites:
+
+- Booking.com
+- Agoda
+- Trip.com
+
+Return the direct hotel page URL on each site. A search-results or city-list URL is NOT acceptable —
+it must be the page for this specific property.
+
+Confirm the match by reading the hotel name AND address on the page. If a site has no page for this
+exact property, return null for that site rather than guessing or substituting a similar hotel in a
+different location.
+
+Set confident to true only if at least one URL is a verified match for the property above.`
+
+  if (!hasApiKey()) {
+    return simulateOtaUrls({ hotelName, address })
+  }
+
+  try {
+    const data = await callGemini({ prompt, useUrlContext: false, schema: OTA_URL_SCHEMA })
+    const urls = {
+      booking: cleanUrl(data.booking),
+      agoda: cleanUrl(data.agoda),
+      tripcom: cleanUrl(data.tripcom),
+    }
+    return {
+      urls,
+      confident: Boolean(data.confident),
+      matchedName: data.matchedName || null,
+      matchedAddress: data.matchedAddress || null,
+      notes: data.notes || null,
+      simulated: false,
+    }
+  } catch (err) {
+    return {
+      urls: { booking: null, agoda: null, tripcom: null },
+      confident: false,
+      notes: `Could not resolve OTA pages: ${err.message}`,
+      simulated: false,
+    }
+  }
+}
+
+function cleanUrl(u) {
+  const s = String(u || '').trim()
+  return /^https?:\/\//i.test(s) ? s : null
+}
+
+function simulateOtaUrls({ hotelName, address }) {
+  const slug = String(hotelName || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+  const iso = 'my'
+  return {
+    urls: {
+      booking: `https://www.booking.com/hotel/${iso}/${slug}.html`,
+      agoda: `https://www.agoda.com/${slug}/hotel/kuala-lumpur-my.html`,
+      tripcom: `https://www.trip.com/hotels/detail/?hotelId=${slug}`,
+    },
+    confident: true,
+    matchedName: hotelName,
+    matchedAddress: address || null,
+    notes: 'No GEMINI_API_KEY configured — OTA URLs are simulated.',
+    simulated: true,
+  }
 }
 
 /**
@@ -152,7 +248,7 @@ function simulate({ hotelName, ota, dates, roomNames, basePrice, basePrices = {}
   const rand = seededRandom(`${hotelName}|${ota}`)
   const dayIndex = Math.floor(Date.now() / 86_400_000)
   const dayRand = seededRandom(`${hotelName}|${ota}|${dayIndex}`)
-  const names = roomNames?.length ? roomNames : ['Deluxe Room', 'Twin Room', 'Suite']
+  const names = roomNames?.length ? roomNames : suggestRoomTypes(hotelName)
   const bias = OTA_BIAS[ota] || 1
 
   const rows = []
