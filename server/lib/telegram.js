@@ -161,7 +161,7 @@ export async function sendDailyDigest({ myHotel, checks, alerts }) {
   const recentAlerts = alerts.filter((a) => new Date(a.createdAt).getTime() >= since)
   const byType = (t) => recentAlerts.filter((a) => a.type === t)
 
-  const lines = [`📊 HotelTrackr daily digest — ${formatKL(new Date(), { dateOnly: true })}`]
+  const lines = [`📊 EC Price Tracker daily digest — ${formatKL(new Date(), { dateOnly: true })}`]
 
   const sales = byType('SALE')
   const soldOuts = byType('SOLDOUT')

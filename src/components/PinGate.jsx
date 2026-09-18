@@ -63,10 +63,10 @@ export default function PinGate() {
       <div className="w-full max-w-sm animate-fade-up">
         <div className="mb-7 text-center">
           <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-brand-900 text-lg font-bold text-brand-100 shadow-lift">
-            HT
+            EC
           </span>
           <h1 className="mt-4 font-display text-2xl font-semibold tracking-tight text-white">
-            HotelTrackr
+            EC Price Tracker
           </h1>
           <p className="mt-1 text-sm text-ink-300">Enter your PIN to unlock the rate monitor</p>
         </div>

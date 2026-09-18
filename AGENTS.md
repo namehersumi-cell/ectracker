@@ -1,4 +1,4 @@
-# AGENTS.md — HotelTrackr
+# AGENTS.md — EC Price Tracker
 
 Repository knowledge for future sessions. Read this before making changes.
 

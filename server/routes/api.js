@@ -623,7 +623,7 @@ router.get('/cron/run-checks', async (req, res) => {
 
   const summary = await checkAll({ notify: true })
   const lines = [
-    `HotelTrackr check run ${summary.ranAt}`,
+    `EC Price Tracker check run ${summary.ranAt}`,
     `total=${summary.total} ok=${summary.ok} suspect=${summary.suspect} failed=${summary.failed} alerts=${summary.alerts}`,
   ]
   if (summary.errors.length) {
@@ -666,7 +666,7 @@ router.get('/status', async (_req, res) => {
 
 /** Notifications settings are needed by the checks pipeline. */
 router.get('/notifications/test', requireSession, async (_req, res) => {
-  const result = await sendTelegram('✅ HotelTrackr Telegram is working')
+  const result = await sendTelegram('✅ EC Price Tracker Telegram is working')
   res.json(result)
 })
 

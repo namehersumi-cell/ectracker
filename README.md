@@ -1,4 +1,7 @@
-# HotelTrackr
+# EC Price Tracker
+
+> Internal repo name: `EC Price Tracker`. The application name throughout the
+> code and UI is also EC Price Tracker.
 
 A competitor rate monitor for an independent hotel. It reads competitor
 nightly rates off Booking.com, Agoda and Trip.com, stores the history, and

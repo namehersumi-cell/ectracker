@@ -35,7 +35,7 @@ app.use((err, req, res, next) => {
 async function start() {
   await getStore()
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`HotelTrackr server listening on http://0.0.0.0:${PORT}`)
+    console.log(`EC Price Tracker server listening on http://0.0.0.0:${PORT}`)
     if (!process.env.GEMINI_API_KEY) {
       console.log('GEMINI_API_KEY not set — extraction runs in simulated mode.')
     }

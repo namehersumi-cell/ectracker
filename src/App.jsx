@@ -19,7 +19,7 @@ export default function App() {
       <div className="grid min-h-screen place-items-center bg-ink-950">
         <div className="flex flex-col items-center gap-3 text-ink-300">
           <Spinner className="h-6 w-6" />
-          <p className="text-sm">Loading HotelTrackr…</p>
+          <p className="text-sm">Loading EC Price Tracker…</p>
         </div>
       </div>
     )

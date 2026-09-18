@@ -45,11 +45,11 @@ export default function Layout() {
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:px-6">
           <div className="flex items-center gap-2.5">
             <span className="grid h-9 w-9 place-items-center rounded-lg bg-brand-950 text-sm font-bold text-brand-100 shadow-sm">
-              HT
+              EC
             </span>
             <div className="leading-tight">
               <p className="font-display text-base font-semibold tracking-tight text-ink-900">
-                HotelTrackr
+                EC Price Tracker
               </p>
               <p className="hidden text-[11px] text-ink-500 sm:block">
                 {dashboard?.myHotel?.name || 'Competitor rate monitor'}

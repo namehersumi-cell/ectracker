@@ -1,9 +1,9 @@
 {
-  "name": "hoteltrackr",
+  "name": "ec-price-tracker",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "HotelTrackr - competitor rate monitor for independent hotels",
+  "description": "EC Price Tracker - competitor rate monitor for independent hotels",
   "scripts": {
     "dev:server": "node --watch server/index.js",
     "dev:client": "vite",
