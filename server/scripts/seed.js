@@ -146,6 +146,9 @@ async function seed() {
     {
       name: myHotel.name,
       id: own.id,
+      // Without this the alert loop below treats our own hotel as a rival and
+      // seeds "you sold a room" alerts, which is noise on the dashboard.
+      isOwn: true,
       prices: Object.fromEntries(MY_ROOMS.map((r) => [r.name, r.basePrice])),
       otaUrls: { booking: 'x', agoda: 'x', tripcom: null },
       rooms: MY_ROOMS.map((r) => r.name),
@@ -245,11 +248,13 @@ async function seed() {
 
         // Seed a handful of alerts along the way so the History and Dashboard
         // panels are populated.
-        if (d < 20 && rand() > 0.86) {
+        if (d < 20 && rand() > 0.86 && !comp.isOwn) {
           const room = comp.rooms[Math.floor(rand() * comp.rooms.length)]
           const price = comp.prices[room] || 150
           const undercut = price < (MY_ROOMS.find((r) => r.name === room)?.basePrice || 160) - 10
           const type = undercut ? 'UNDERCUT' : rand() > 0.5 ? 'SALE' : 'PRICE_DROP'
+          const otaLabel = { booking: 'Booking.com', agoda: 'Agoda', tripcom: 'Trip.com' }[ota]
+          const mine = MY_ROOMS.find((r) => r.name === room)?.basePrice || 160
           const alertId = newId()
           await store.set('alerts', alertId, {
             id: alertId,
@@ -263,14 +268,14 @@ async function seed() {
             checkInDate: today,
             checkInLabel: 'Tonight',
             price,
-            myPrice: MY_ROOMS.find((r) => r.name === room)?.basePrice || null,
+            myPrice: type === 'UNDERCUT' ? mine : null,
             roomsLeft: 2,
             message:
               type === 'UNDERCUT'
-                ? `🔴 ${comp.name} dropped ${room} to RM ${price} on ${ota} (Tonight) — below your rate.`
+                ? `🔴 ${comp.name} dropped ${room} to RM ${price} on ${otaLabel} (Tonight) — RM ${mine - price} below your RM ${mine}.`
                 : type === 'SALE'
-                  ? `🟡 ${comp.name} sold 2× ${room} at ~RM ${price} on ${ota} (Tonight). 2 left.`
-                  : `📉 ${comp.name} dropped ${room} to RM ${price} on ${ota} (Tonight).`,
+                  ? `🟡 ${comp.name} sold 2× ${room} at ~RM ${price} on ${otaLabel} (Tonight). 2 left.`
+                  : `📉 ${comp.name} dropped ${room} to RM ${price} on ${otaLabel} (Tonight).`,
             read: d > 1,
             notify: true,
             notified: true,

@@ -316,6 +316,56 @@ describe('alert detection', () => {
     )
   })
 
+  test('my own hotel never undercuts itself', async () => {
+    const today = checkInDates()[0].date
+    const check = makeCheck({
+      competitorId: 'comp-own',
+      ota: 'booking',
+      rooms: [
+        { name: 'Deluxe Room', price: 120, currency: 'MYR', roomsLeft: 5, soldOut: false, checkInDate: today },
+      ],
+    })
+    // My own hotel, priced well below my own published rate.
+    const alerts = await detectAlerts({
+      check,
+      competitor: { id: 'comp-own', name: 'My Hotel', isOwn: true, otaUrls: { booking: 'x' } },
+      myHotel: MY_HOTEL,
+      mappings: [],
+    })
+    assert.equal(
+      alerts.find((a) => a.type === 'UNDERCUT'),
+      undefined,
+      'a self-comparison is not an undercut — tracking yourself is for OTA parity only',
+    )
+  })
+
+  test('tracking my own hotel still reports OTA parity problems', async () => {
+    const today = checkInDates()[0].date
+    await seedPrevious(
+      [
+        { name: 'Deluxe Room', price: 160, currency: 'MYR', roomsLeft: 4, soldOut: false, checkInDate: today },
+      ],
+      { ota: 'agoda', competitorId: 'comp-own' },
+    )
+    const check = makeCheck({
+      competitorId: 'comp-own',
+      ota: 'agoda',
+      rooms: [
+        { name: 'Deluxe Room', price: 150, currency: 'MYR', roomsLeft: 4, soldOut: false, checkInDate: today },
+      ],
+    })
+    const alerts = await detectAlerts({
+      check,
+      competitor: { id: 'comp-own', name: 'My Hotel', isOwn: true, otaUrls: { agoda: 'y' } },
+      myHotel: MY_HOTEL,
+      mappings: [],
+    })
+    // The own hotel is on Agoda cheaper than my published rate: that gap is a
+    // parity problem worth knowing about, so PRICE_DROP still fires.
+    assert.ok(alerts.some((a) => a.type === 'PRICE_DROP'))
+    assert.equal(alerts.find((a) => a.type === 'UNDERCUT'), undefined)
+  })
+
   test('PRICE_RISE defaults to notify: false to reduce noise', async () => {
     const today = checkInDates()[0].date
     await seedPrevious([

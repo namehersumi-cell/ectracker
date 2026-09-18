@@ -200,7 +200,9 @@ export async function detectAlerts({ check, competitor, myHotel, mappings, notif
     }
 
     // 3. UNDERCUT — priced below my own mapped rate.
-    if (!room.soldOut && room.price > 0) {
+    //    Skipped for my own hotel: tracking yourself is for OTA-parity and
+    //    accuracy checks, and "you undercut yourself by RM 12" is meaningless.
+    if (!competitor.isOwn && !room.soldOut && room.price > 0) {
       for (const myRoom of myHotel?.roomTypes || []) {
         const mapping = mappingFor(myRoom.id)
         const matchesByName = roomNamesMatch(room.name, myRoom.name)
