@@ -5,6 +5,8 @@ import Toasts from './components/Toasts.jsx'
 import PinGate from './components/PinGate.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import MyHotel from './pages/MyHotel.jsx'
+import MapPage from './pages/MapPage.jsx'
+import Rooms from './pages/Rooms.jsx'
 import Competitors from './pages/Competitors.jsx'
 import CalendarPage from './pages/CalendarPage.jsx'
 import History from './pages/History.jsx'
@@ -40,6 +42,8 @@ export default function App() {
         <Route element={<Layout />}>
           <Route index element={<Dashboard />} />
           <Route path="hotel" element={<MyHotel />} />
+          <Route path="map" element={<MapPage />} />
+          <Route path="rooms" element={<Rooms />} />
           <Route path="competitors" element={<Competitors />} />
           <Route path="calendar" element={<CalendarPage />} />
           <Route path="history" element={<History />} />

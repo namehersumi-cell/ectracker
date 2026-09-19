@@ -93,10 +93,11 @@ credentials; the status appears in Settings.
 
 | Collection | Shape |
 | --- | --- |
-| `settings/myHotel` | `{ name, roomTypes: [{ id, name, basePrice, capacity }] }` |
+| `settings/myHotel` | `{ name, roomTypes: [{ id, name, basePrice, capacity }], location: { lat, lng, address, city, placeId } }` |
 | `settings/notifications` | per-type toggles, quiet hours, digest times |
+| `settings/discovery` | `{ radiusM }` — the map search radius |
 | `settings/handover` | `{ current, notes[3] }` — shift handover |
-| `competitors/{id}` | `{ name, otaUrls: { booking, agoda, tripcom }, active, isOwn }` |
+| `competitors/{id}` | `{ name, otaUrls: { booking, agoda, tripcom }, active, isOwn, source, address, placeId, location, discoveredRoomNames[] }` |
 | `roomMappings/{id}` | `{ competitorId, myRoomTypeId, otaRoomName }` |
 | `priceChecks/{id}` | `{ competitorId, ota, checkedAt, status, method, simulated, roomTypes[] }` |
 | `alerts/{id}` | `{ type, ..., read, notify, notified, mergedOtas, checkInDate }` |
@@ -108,6 +109,38 @@ credentials; the status appears in Settings.
 
 Each `priceChecks` room entry carries `checkInDate`, `suspect`, `reported` and
 optional `originalCurrency`/`originalPrice` — the v2 additions.
+
+`competitors` gained `source` (`manual` or `map`), the map provenance fields
+(`address`, `placeId`, `location`) and `discoveredRoomNames`, which is the list
+of room names actually read off the OTAs and the set the linking screen offers.
+
+---
+
+## Setting your property from the map
+
+The Map page replaces the manual comp-set setup — no more hunting for each rival
+and pasting three OTA URLs by hand.
+
+1. **Set the property.** Type your hotel name; suggestions come from Google
+   Maps with the full address. Picking one stores the name, address and
+   coordinates.
+2. **Choose a radius.** Presets from 500 m to 5 km, or drag the slider. Every
+   hotel inside the circle becomes a candidate, with distance and rating.
+3. **Add the ones you want.** For each hotel the app resolves its page on
+   Booking.com, Agoda and Trip.com, then reads every room type and price on all
+   three — automatically.
+4. **Confirm the room links.** This is the one step that needs a human, because
+   only you know that your "Standard Queen Room" is the next hotel's "Deluxe
+   Queen Room". Suggestions are ranked with the reasoning shown, and anything
+   unambiguous is pre-filled.
+
+Room Prices then shows one row per room type with Booking.com, Agoda and
+Trip.com side by side, the cheapest OTA, the OTA spread, and how your rate
+compares to the cheapest rival — by name, not just a number.
+
+Without `GOOGLE_MAPS_API_KEY` the whole flow still runs against a deterministic
+local simulator and every result is labelled 🧪. The code path is identical, so
+the only change when you add a key is that the places become real.
 
 ---
 
@@ -130,6 +163,29 @@ prices in favour of the cheapest bookable public rate.
 which is the norm for JavaScript-heavy Trip.com and Agoda pages — it retries
 with `Google Search` grounding and records `method: 'google_search'`. A failing
 OTA is stored as `status: 'error'` and never blocks the others.
+
+A hotel discovered on the map has no URLs yet, so `resolveOtaUrls` asks Gemini
+to find the property's page on each OTA. The result is rejected if it looks like
+a search-results URL, and the model is told to return `null` rather than
+substitute a same-named hotel in another city — a wrong URL is worse than none,
+because it would quietly feed another hotel's rates into every comparison.
+
+### Room linking, and why it asks
+
+OTAs let each hotel name its rooms however it likes, so the operator's
+"Standard Queen Room" may be "Deluxe Queen Room" at the hotel next door.
+Matching is scored, and the two signals are treated very differently:
+
+- **Bed configuration and occupancy are hard conflicts.** Queen vs Twin is a
+  different product; the score is capped and the pairing is never suggested.
+- **Marketing tier is not.** Hotels routinely sell the same physical room as
+  "Standard" or "Deluxe", which is exactly the case that must be linkable. A
+  differing tier still produces a suggestion, it just never auto-links.
+
+Only an unambiguous match (≥ 0.85, with no tier tension) is pre-filled;
+everything else is surfaced with its reasoning and a confidence figure for a
+one-click confirm. Links are one-to-one per competitor, so two of your rooms can
+never claim the same competitor room and double-count its price.
 
 ### Guards before anything is trusted
 

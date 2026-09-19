@@ -6,9 +6,19 @@ import {
   checkCompetitorOta,
   getGeminiUsage,
   getOtaHealth,
+  getRoomPriceMatrix,
   recordGeminiCall,
 } from '../lib/checks.js'
 import { OTA_LABELS, hasApiKey } from '../lib/gemini.js'
+import { hasMapsKey, placeDetails, searchPlaces } from '../lib/places.js'
+import {
+  DEFAULT_RADIUS_M,
+  addDiscoveredHotels,
+  refreshCompetitorRooms,
+  saveDiscoverySettings,
+  scanNearby,
+} from '../lib/discovery.js'
+import { suggestLinksForHotel } from '../lib/room-match.js'
 import {
   sendTelegram,
   telegramConfigured,
@@ -64,7 +74,7 @@ router.get('/settings/my-hotel', async (_req, res) => {
 })
 
 router.put('/settings/my-hotel', async (req, res) => {
-  const { name, roomTypes } = req.body || {}
+  const { name, roomTypes, location } = req.body || {}
   if (typeof name !== 'string' || !name.trim()) {
     return res.status(400).json({ error: 'Hotel name is required' })
   }
@@ -84,8 +94,28 @@ router.put('/settings/my-hotel', async (req, res) => {
       capacity: Number(rt.capacity) || 2,
     })
   }
+  const patch = { name: name.trim(), roomTypes: cleaned }
+  if (location !== undefined) {
+    // null clears the pin; anything else must carry usable coordinates.
+    if (location === null) {
+      patch.location = null
+    } else {
+      const lat = Number(location.lat)
+      const lng = Number(location.lng)
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return res.status(400).json({ error: 'Location needs numeric lat and lng' })
+      }
+      patch.location = {
+        lat,
+        lng,
+        address: location.address || null,
+        city: location.city || null,
+        placeId: location.placeId || null,
+      }
+    }
+  }
   const store = await getStore()
-  const saved = await store.set('settings', 'myHotel', { name: name.trim(), roomTypes: cleaned })
+  const saved = await store.set('settings', 'myHotel', patch)
   res.json(saved)
 })
 
@@ -128,7 +158,8 @@ router.get('/competitors', async (_req, res) => {
 })
 
 router.post('/competitors', async (req, res) => {
-  const { name, otaUrls = {}, active = true, isOwn = false } = req.body || {}
+  const { name, otaUrls = {}, active = true, isOwn = false, address, location, placeId } =
+    req.body || {}
   if (!name || !name.trim()) return res.status(400).json({ error: 'Hotel name is required' })
   const urls = {
     booking: (otaUrls.booking || '').trim() || null,
@@ -144,6 +175,10 @@ router.post('/competitors', async (req, res) => {
     otaUrls: urls,
     active: Boolean(active),
     isOwn: Boolean(isOwn),
+    address: address || null,
+    placeId: placeId || null,
+    location: location?.lat != null ? { lat: Number(location.lat), lng: Number(location.lng) } : null,
+    source: 'manual',
   })
   res.status(201).json(saved)
 })
@@ -152,7 +187,7 @@ router.put('/competitors/:id', async (req, res) => {
   const store = await getStore()
   const existing = await store.get('competitors', req.params.id)
   if (!existing) return res.status(404).json({ error: 'Competitor not found' })
-  const { name, otaUrls, active, isOwn } = req.body || {}
+  const { name, otaUrls, active, isOwn, address, location, discoveredRoomNames } = req.body || {}
   const patch = {}
   if (typeof name === 'string' && name.trim()) patch.name = name.trim()
   if (otaUrls) {
@@ -164,6 +199,12 @@ router.put('/competitors/:id', async (req, res) => {
   }
   if (typeof active === 'boolean') patch.active = active
   if (typeof isOwn === 'boolean') patch.isOwn = isOwn
+  if (address !== undefined) patch.address = address || null
+  if (Array.isArray(discoveredRoomNames)) patch.discoveredRoomNames = discoveredRoomNames
+  if (location !== undefined) {
+    patch.location =
+      location?.lat != null ? { lat: Number(location.lat), lng: Number(location.lng) } : null
+  }
   res.json(await store.set('competitors', req.params.id, patch))
 })
 
@@ -211,6 +252,180 @@ router.put('/room-mappings', async (req, res) => {
       competitorId,
       myRoomTypeId,
       otaRoomName: otaRoomName.trim(),
+    }),
+  )
+})
+
+/* -------------------------------------------------------------- discovery */
+
+/** Hotel/address autocomplete so a property can be set from the map. */
+router.get('/places/autocomplete', async (req, res) => {
+  try {
+    const result = await searchPlaces(req.query.q, { sessionToken: req.query.sessionToken })
+    res.json({ ...result, mapsConfigured: hasMapsKey() })
+  } catch (err) {
+    res.status(502).json({ error: err.message, suggestions: [] })
+  }
+})
+
+router.get('/places/:placeId', async (req, res) => {
+  try {
+    res.json(await placeDetails(req.params.placeId))
+  } catch (err) {
+    res.status(502).json({ error: err.message })
+  }
+})
+
+/** Radius scan around my hotel: propose the comp set instead of typing it. */
+router.get('/discovery/scan', async (req, res) => {
+  try {
+    const result = await scanNearby({
+      radiusM: req.query.radiusM,
+      lat: req.query.lat != null ? Number(req.query.lat) : undefined,
+      lng: req.query.lng != null ? Number(req.query.lng) : undefined,
+    })
+    if (result.error) return res.status(400).json(result)
+    res.json(result)
+  } catch (err) {
+    res.status(502).json({ error: err.message, hotels: [] })
+  }
+})
+
+router.get('/discovery/settings', async (_req, res) => {
+  const store = await getStore()
+  const saved = (await store.get('settings', 'discovery')) || {}
+  res.json({ radiusM: saved.radiusM ?? DEFAULT_RADIUS_M })
+})
+
+router.put('/discovery/settings', async (req, res) => {
+  res.json(await saveDiscoverySettings({ radiusM: req.body?.radiusM }))
+})
+
+/**
+ * Add the selected hotels: resolve their OTA pages, read rooms and rates, and
+ * propose room links. Long-running, so it is session-gated like other checks.
+ */
+router.post('/discovery/add', requireSession, async (req, res) => {
+  const { hotels, radiusM } = req.body || {}
+  if (!Array.isArray(hotels) || hotels.length === 0) {
+    return res.status(400).json({ error: 'Select at least one hotel to add' })
+  }
+  if (hotels.length > 20) {
+    return res.status(400).json({ error: 'Add at most 20 hotels at a time' })
+  }
+  try {
+    res.json(await addDiscoveredHotels({ hotels, radiusM }))
+  } catch (err) {
+    res.status(502).json({ error: err.message })
+  }
+})
+
+/** Backfill OTA URLs / rooms for a competitor added before discovery existed. */
+router.post('/competitors/:id/refresh-rooms', requireSession, async (req, res) => {
+  try {
+    const result = await refreshCompetitorRooms(req.params.id)
+    if (result.error) return res.status(404).json(result)
+    res.json(result)
+  } catch (err) {
+    res.status(502).json({ error: err.message })
+  }
+})
+
+/* ---------------------------------------------------------- room linking */
+
+/** Proposed links between my room types and a competitor's OTA room names. */
+router.get('/room-links/suggestions', async (req, res) => {
+  const store = await getStore()
+  const myHotel = (await store.get('settings', 'myHotel')) || { roomTypes: [] }
+  const mappings = await store.list('roomMappings')
+
+  const competitors = req.query.competitorId
+    ? [await store.get('competitors', req.query.competitorId)].filter(Boolean)
+    : await store.list('competitors')
+
+  const out = competitors.map((comp) => {
+    const existing = mappings.filter((m) => m.competitorId === comp.id)
+    const takenNames = existing.map((m) => m.otaRoomName)
+    const claimed = new Set(existing.map((m) => m.myRoomTypeId))
+
+    const suggestions = suggestLinksForHotel({
+      myRoomTypes: (myHotel.roomTypes || []).filter((r) => !claimed.has(r.id)),
+      competitorRoomNames: comp.discoveredRoomNames || [],
+      exclude: takenNames,
+    })
+
+    // Any of my room types with no link and no suggestion still needs a human.
+    const linkedIds = new Set(existing.map((m) => m.myRoomTypeId))
+    const suggestedIds = new Set(suggestions.map((s) => s.myRoomTypeId))
+    const unlinked = (myHotel.roomTypes || [])
+      .filter((r) => !linkedIds.has(r.id) && !suggestedIds.has(r.id))
+      .map((r) => ({ id: r.id, name: r.name }))
+
+    return {
+      competitorId: comp.id,
+      competitorName: comp.name,
+      isOwn: Boolean(comp.isOwn),
+      discoveredRoomNames: comp.discoveredRoomNames || [],
+      existing,
+      suggestions,
+      unlinked,
+    }
+  })
+
+  res.json({
+    myRoomTypes: (myHotel.roomTypes || []).map((r) => ({ id: r.id, name: r.name })),
+    competitors: out,
+  })
+})
+
+/** Apply links in bulk: what the operator confirms on the linking screen. */
+router.put('/room-links/bulk', async (req, res) => {
+  const { competitorId, links } = req.body || {}
+  if (!competitorId) return res.status(400).json({ error: 'competitorId is required' })
+  if (!Array.isArray(links)) return res.status(400).json({ error: 'links must be an array' })
+
+  const store = await getStore()
+  const competitor = await store.get('competitors', competitorId)
+  if (!competitor) return res.status(404).json({ error: 'Competitor not found' })
+
+  const saved = []
+  const removed = []
+  for (const link of links) {
+    const { myRoomTypeId, otaRoomName } = link || {}
+    if (!myRoomTypeId) continue
+    const existing = await store.query(
+      'roomMappings',
+      (m) => m.competitorId === competitorId && m.myRoomTypeId === myRoomTypeId,
+    )
+
+    // An empty name means "unlink", which must delete rather than store "".
+    if (!otaRoomName || !String(otaRoomName).trim()) {
+      for (const row of existing) {
+        await store.delete('roomMappings', row.id)
+        removed.push(row.id)
+      }
+      continue
+    }
+
+    const name = String(otaRoomName).trim()
+    if (existing.length) {
+      saved.push(await store.set('roomMappings', existing[0].id, { otaRoomName: name }))
+    } else {
+      saved.push(
+        await store.add('roomMappings', { competitorId, myRoomTypeId, otaRoomName: name }),
+      )
+    }
+  }
+  res.json({ saved, removed, ok: true })
+})
+
+/** Room type -> per-OTA price table, with the OTA tag on every price. */
+router.get('/room-prices', async (req, res) => {
+  const offset = Number(req.query.offset || 0)
+  res.json(
+    await getRoomPriceMatrix({
+      checkInDate: req.query.checkInDate,
+      offset: [0, 7, 30].includes(offset) ? offset : 0,
     }),
   )
 })
@@ -656,6 +871,7 @@ router.get('/status', async (_req, res) => {
   res.json({
     ok: true,
     gemini: hasApiKey() ? 'live' : 'simulated',
+    maps: hasMapsKey() ? 'live' : 'simulated',
     telegram: telegramConfigured() ? 'configured' : 'not configured',
     pinGate: pinGateEnabled() ? 'enabled' : 'disabled',
     store: storeKind(),

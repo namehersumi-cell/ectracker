@@ -208,6 +208,11 @@ export default function Settings() {
               tone={status.gemini === 'live' ? 'emerald' : 'amber'}
             />
             <StatusRow
+              label="Google Maps"
+              value={status.maps === 'live' ? 'Live API' : 'Simulated (no API key)'}
+              tone={status.maps === 'live' ? 'emerald' : 'amber'}
+            />
+            <StatusRow
               label="Telegram"
               value={status.telegram === 'configured' ? 'Configured' : 'Not configured'}
               tone={status.telegram === 'configured' ? 'emerald' : 'amber'}

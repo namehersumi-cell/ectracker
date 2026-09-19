@@ -17,10 +17,18 @@ const MY_ROOMS = [
   { name: 'Family Suite', basePrice: 260, capacity: 4 },
 ]
 
+/**
+ * Roughly real Kuala Lumpur coordinates, spaced so the map shows a sensible
+ * comp set inside a 2 km radius of my hotel.
+ */
+const KL_ORIGIN = { lat: 3.1478, lng: 101.7009 }
+
 const COMPETITORS = [
   {
     name: 'The Sterling Hotel',
     isOwn: false,
+    coords: { lat: 3.1502, lng: 101.7032 },
+    address: '18 Jalan Sultan Ismail, 50250 Kuala Lumpur, Malaysia',
     otaUrls: {
       booking: 'https://www.booking.com/hotel/my/the-sterling.html',
       agoda: 'https://www.agoda.com/the-sterling-hotel/hotel/kuala-lumpur-my.html',
@@ -32,6 +40,8 @@ const COMPETITORS = [
   {
     name: 'Marina Bay Suites',
     isOwn: false,
+    coords: { lat: 3.1455, lng: 101.6988 },
+    address: '11 Jalan Bukit Bintang, 55100 Kuala Lumpur, Malaysia',
     otaUrls: {
       booking: 'https://www.booking.com/hotel/my/marina-bay-suites.html',
       agoda: 'https://www.agoda.com/marina-bay-suites/hotel/kuala-lumpur-my.html',
@@ -43,6 +53,8 @@ const COMPETITORS = [
   {
     name: 'Casa Del Rio',
     isOwn: false,
+    coords: { lat: 3.1526, lng: 101.6962 },
+    address: '4 Jalan Ampang, 50450 Kuala Lumpur, Malaysia',
     otaUrls: {
       booking: 'https://www.booking.com/hotel/my/casa-del-rio.html',
       agoda: null,
@@ -54,6 +66,8 @@ const COMPETITORS = [
   {
     name: 'The Robertson',
     isOwn: false,
+    coords: { lat: 3.1431, lng: 101.7055 },
+    address: '22 Jalan Pudu, 55100 Kuala Lumpur, Malaysia',
     otaUrls: {
       booking: 'https://www.booking.com/hotel/my/the-robertson.html',
       agoda: 'https://www.agoda.com/the-robertson/hotel/kuala-lumpur-my.html',
@@ -66,6 +80,8 @@ const COMPETITORS = [
     name: 'Hotel Sri Petaling',
     isOwn: false,
     active: true,
+    coords: { lat: 3.1385, lng: 101.6905 },
+    address: '88 Jalan Tun Razak, 50400 Kuala Lumpur, Malaysia',
     otaUrls: {
       booking: 'https://www.booking.com/hotel/my/sri-petaling.html',
       agoda: null,
@@ -102,8 +118,17 @@ async function seed() {
   const myHotel = {
     name: 'Rumah Ku Boutique Hotel',
     roomTypes: MY_ROOMS.map((r) => ({ id: newId(), ...r })),
+    // Pre-set so the map and radius discovery work on first run.
+    location: {
+      lat: KL_ORIGIN.lat,
+      lng: KL_ORIGIN.lng,
+      address: '12 Jalan Sultan Ismail, 50250 Kuala Lumpur, Malaysia',
+      city: 'Kuala Lumpur',
+      placeId: 'seed-rumah-ku',
+    },
   }
   await store.set('settings', 'myHotel', myHotel)
+  await store.set('settings', 'discovery', { radiusM: 2000 })
 
   const compIds = {}
   for (const comp of COMPETITORS) {
@@ -112,6 +137,10 @@ async function seed() {
       otaUrls: comp.otaUrls,
       active: comp.active !== false,
       isOwn: Boolean(comp.isOwn),
+      source: 'map',
+      address: comp.address,
+      location: comp.coords,
+      discoveredRoomNames: comp.rooms,
     })
     compIds[comp.name] = saved.id
   }
@@ -127,6 +156,10 @@ async function seed() {
     },
     active: true,
     isOwn: true,
+    source: 'map',
+    address: myHotel.location.address,
+    location: { lat: KL_ORIGIN.lat, lng: KL_ORIGIN.lng },
+    discoveredRoomNames: MY_ROOMS.map((r) => r.name),
   })
 
   for (const comp of [...COMPETITORS, { name: myHotel.name, rooms: MY_ROOMS.map((r) => r.name) }]) {
